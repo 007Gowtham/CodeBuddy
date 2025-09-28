@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "Platform for challenge the dsa with friends",
   "main": "index.js",
+  "type": "module",
   "scripts": {
    "start": "node index.js",
-   "dev":"nodemon index.js"
+   "dev":"nodemon src/index.js"
   },
   "repository": {
     "type": "git",
