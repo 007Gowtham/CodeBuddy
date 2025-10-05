@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Room {
+  room_id     Int           @id @default(autoincrement())
+  name        String
+  team_size   Int
+  max_teams   Int
+  duration    Int
+  created_at  DateTime      @default(now())
+
+  teams       Team[]
+  roomTopics  RoomTopic[]
+  leaderboard Leaderboard[]
+
+  @@index([created_at])
+}
+
+// RoomTopic (direct container for questions)
+model RoomTopic {
+  id              Int        @id @default(autoincrement())
+  room_id         Int
+  name            String
+  level           String
+  no_of_questions Int
+
+  room            Room       @relation(fields: [room_id], references: [room_id], onDelete: Cascade)
+  questions       Question[]
+
+  @@index([room_id])
+  @@index([room_id, level])
+}
+
+// Team
+model Team {
+  team_id         Int           @id @default(autoincrement())
+  room_id         Int
+  team_name       String
+  score           Int           @default(0)
+  problems_solved Int           @default(0)
+
+  room            Room          @relation(fields: [room_id], references: [room_id], onDelete: Cascade)
+  players         Player[]
+  answers         Answer[]
+  leaderboard     Leaderboard[]
+  questionAssignments QuestionAssignment[]
+
+  @@unique([room_id, team_name])
+  @@index([room_id])
+  @@index([room_id, score(sort: Desc)])
+}
+
+// Player
+model Player {
+  player_id   Int      @id @default(autoincrement())
+  team_id     Int
+  nickname    String
+  total_score Int      @default(0)
+
+  team        Team     @relation(fields: [team_id], references: [team_id], onDelete: Cascade)
+  answers     Answer[]
+  questionAssignments QuestionAssignment[]
+
+  @@unique([team_id, nickname])
+  @@index([team_id])
+}
+
+// Constraint model - one-to-one with Question
+model Constraint {
+  constraint_id   Int      @id @default(autoincrement())
+  question_id     Int      @unique
+  description     String   // e.g., "1 <= n <= 10^5\n-10^4 <= arr[i] <= 10^4"
+
+  question        Question @relation(fields: [question_id], references: [question_id], onDelete: Cascade)
+}
+
+
+model Question {
+  question_id    Int              @id @default(autoincrement())
+  room_topic_id  Int
+  name           String
+  description    String?
+  level_override String?
+  created_at     DateTime         @default(now())
+
+  roomTopic      RoomTopic        @relation(fields: [room_topic_id], references: [id], onDelete: Cascade)
+  examples       QuestionExample[]
+  testCases      TestCase[]
+  answers        Answer[]
+  questionAssignments QuestionAssignment[]
+  constraint     Constraint?      // New one-to-one relation
+
+  @@index([room_topic_id])
+  @@index([room_topic_id, created_at])
+}
+
+// QuestionExample - One-to-Many for sample inputs/outputs
+model QuestionExample {
+  example_id   Int      @id @default(autoincrement())
+  question_id  Int
+  input        String
+  output       String
+  explanation  String?  // Optional explanation for the example
+  order        Int      @default(0) // To maintain order of examples
+
+  question     Question @relation(fields: [question_id], references: [question_id], onDelete: Cascade)
+
+  @@index([question_id])
+  @@index([question_id, order])
+}
+
+// TestCase - Many-to-One with Question
+model TestCase {
+  test_case_id    Int     @id @default(autoincrement())
+  question_id     Int
+  input           String  @db.Text // Actual test input
+  expected_output String  @db.Text // Expected correct output
+  is_sample       Boolean @default(false) // True if visible to participants
+  is_hidden       Boolean @default(true)  // True for evaluation-only cases
+  weight          Int     @default(1)     // Points/weight for this test case
+  time_limit      Int?    // Time limit in milliseconds (optional)
+  memory_limit    Int?    // Memory limit in MB (optional)
+  order           Int     @default(0)     // Order of execution
+  
+  question        Question @relation(fields: [question_id], references: [question_id], onDelete: Cascade)
+
+  @@index([question_id])
+  @@index([question_id, order])
+  @@index([question_id, is_sample])
+}
+
+// QuestionAssignment - Tracks which player in a team is assigned to which question
+// Ensures only one player per team attempts each question
+model QuestionAssignment {
+  assignment_id Int      @id @default(autoincrement())
+  question_id   Int
+  team_id       Int
+  player_id     Int      // The player assigned to this question
+  assigned_at   DateTime @default(now())
+  
+  question      Question @relation(fields: [question_id], references: [question_id], onDelete: Cascade)
+  team          Team     @relation(fields: [team_id], references: [team_id], onDelete: Cascade)
+  player        Player   @relation(fields: [player_id], references: [player_id], onDelete: Cascade)
+
+  // Ensure each question can only be assigned once per team
+  @@unique([question_id, team_id])
+  // Ensure the player belongs to the team (application-level enforcement recommended)
+  @@index([team_id])
+  @@index([player_id])
+  @@index([question_id])
+}
+
+// Answer
+model Answer {
+  answer_id      Int      @id @default(autoincrement())
+  question_id    Int
+  player_id      Int
+  team_id        Int
+  answer_text    String?  @db.Text
+  marks_obtained Int      @default(0)
+  test_cases_passed Int   @default(0) // Track how many test cases passed
+  total_test_cases  Int   @default(0) // Total test cases for this question
+  submitted_at   DateTime @default(now())
+
+  question       Question @relation(fields: [question_id], references: [question_id], onDelete: Cascade)
+  player         Player   @relation(fields: [player_id], references: [player_id], onDelete: Cascade)
+  team           Team     @relation(fields: [team_id], references: [team_id], onDelete: Cascade)
+
+  // Each player can only submit one answer per question
+  @@unique([question_id, player_id])
+  @@index([team_id])
+  @@index([player_id])
+  @@index([question_id])
+  @@index([submitted_at])
+}
+
+// Leaderboard
+model Leaderboard {
+  leaderboard_id Int      @id @default(autoincrement())
+  room_id        Int
+  team_id        Int
+  rank           Int
+  score          Int
+  updated_at     DateTime @default(now()) @updatedAt
+
+  room           Room     @relation(fields: [room_id], references: [room_id], onDelete: Cascade)
+  team           Team     @relation(fields: [team_id], references: [team_id], onDelete: Cascade)
+
+  @@unique([room_id, team_id])
+  @@index([room_id, rank])
+  @@index([room_id, score(sort: Desc)])
+}
